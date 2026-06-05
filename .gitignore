@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local Claude Code project config (dev-only symlink for using the skill here)
+.claude/
+
+# The yt-dlp virtualenv is bootstrapped at ~/.cache/ytk/venv, never in the repo.
