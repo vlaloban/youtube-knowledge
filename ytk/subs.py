@@ -21,11 +21,27 @@ def _strip_tags(text):
     return re.sub(TAG, "", text).strip()
 
 
+def _line_tokens(line, start):
+    """Split one caption line into (sec, word), following inline timestamps."""
+    out = []
+    pos = 0
+    cur_time = start
+    for mt in INLINE_TS.finditer(line):
+        for w in _strip_tags(line[pos:mt.start()]).split():
+            out.append((cur_time, w))
+        cur_time = _ts_to_sec(*mt.groups())
+        pos = mt.end()
+    for w in _strip_tags(line[pos:]).split():
+        out.append((cur_time, w))
+    return out
+
+
 def parse_vtt(text):
     """Return list of (start_sec, line_text) cleaned and deduplicated."""
     blocks = re.split(r"\n\n+", text)
     tokens = []  # (sec, word)
-    have_word_level = False
+    have_word_level = bool(INLINE_TS.search(text))
+    prev_line = None  # last new caption line seen (auto-captions only)
 
     for block in blocks:
         lines = block.splitlines()
@@ -39,25 +55,22 @@ def parse_vtt(text):
         if m is None or header_idx is None:
             continue
         cue_start = _ts_to_sec(*m.groups()[:4])
-        body = "\n".join(lines[header_idx + 1:])
-        if not body.strip():
+        body_lines = lines[header_idx + 1:]
+        if not "".join(body_lines).strip():
             continue
 
-        if INLINE_TS.search(body):
-            have_word_level = True
-            # First word(s) belong to cue_start; subsequent words get inline ts.
-            pos = 0
-            cur_time = cue_start
-            for mt in INLINE_TS.finditer(body):
-                chunk = body[pos:mt.start()]
-                for w in _strip_tags(chunk).split():
-                    tokens.append((cur_time, w))
-                cur_time = _ts_to_sec(*mt.groups())
-                pos = mt.end()
-            for w in _strip_tags(body[pos:]).split():
-                tokens.append((cur_time, w))
+        if have_word_level:
+            # Auto-captions roll: each cue repeats the previous line above the
+            # new one, and a short filler cue repeats it once more. Keep only
+            # lines that were not just shown.
+            for line in body_lines:
+                plain = _strip_tags(line)
+                if not plain or plain == prev_line:
+                    continue
+                prev_line = plain
+                tokens.extend(_line_tokens(line, cue_start))
         else:
-            cleaned = _strip_tags(body).replace("\n", " ")
+            cleaned = _strip_tags("\n".join(body_lines)).replace("\n", " ")
             cleaned = re.sub(r"\s+", " ", cleaned).strip()
             if cleaned:
                 tokens.append((cue_start, ("__CUE__", cleaned)))

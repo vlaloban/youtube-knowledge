@@ -23,8 +23,10 @@ is `~/.claude/skills/youtube-knowledge/bin/ytk`. Never hardcode a different path
 
 The launcher resolves its own absolute location (following symlinks), so it works
 from any working directory. On first invocation it builds a Python virtualenv (in
-`~/.cache/ytk/venv`, outside the skill) and installs `yt-dlp` automatically.
-Requires `python3` and `ffmpeg` on the system — nothing else to configure.
+`~/.cache/ytk/venv`, outside the skill) and installs `yt-dlp` automatically, then
+refreshes it every 7 days (`YTK_UPDATE_DAYS`, `0` disables).
+Requires `python3` and `ffmpeg` on the system, plus a JavaScript runtime
+(`deno`, `node` or `bun`) for full YouTube format support.
 
 All artifacts are saved under `~/yt-knowledge/<video_id>/`:
 `info.json`, `transcript.txt`, `frames/`. The video id is the 11-char YouTube id.
@@ -38,10 +40,18 @@ Override the output root with the `YTK_HOME` env var.
   caption languages, description. Saved to `info.json`.
 - `ytk transcript <url|id> [--lang en] [--quiet]` — fetch existing captions as
   `[MM:SS] text` lines. Prefers manual subs in the original language, falls back to
-  auto-captions. No Whisper fallback — if a video has no captions it reports so.
+  auto-captions. If the video has no captions at all, it transcribes the audio
+  with Whisper instead: a local install (`mlx_whisper` or `whisper` on `PATH`) if
+  there is one, otherwise the Groq or OpenAI API when `GROQ_API_KEY` or
+  `OPENAI_API_KEY` is set (`--whisper` forces Whisper, `--no-whisper` forbids it,
+  `--whisper-provider local|groq|openai` picks one). With neither available it
+  reports that no captions exist.
 - `ytk frames <url|id> --from <t> --to <t> [--every 5]` — extract screenshots across
   a time range without downloading the whole video. Or `--at <t>` for a single frame.
   Times accept `mm:ss`, `h:mm:ss`, or raw seconds. Prints the saved PNG paths.
+- `ytk doctor [--json]` — check yt-dlp (version and age), the JavaScript runtime,
+  `ffmpeg`, Whisper (local install or API key) and the output directory. Exit code 1 means a
+  required piece is missing.
 
 ## Workflow for ONE video
 
@@ -77,4 +87,11 @@ Override the output root with the `YTK_HOME` env var.
 - `--height` (default 720) controls frame resolution; raise it if fine text on a
   slide is unreadable.
 - Always transcribe in the video's original language (the default behavior).
-- If `transcript` reports no captions, tell the user — Whisper is not wired up yet.
+- If `transcript` reports no captions and no Whisper, ask the user to either
+  install a local Whisper (`mlx_whisper` on Apple Silicon, or `whisper`) or add
+  `GROQ_API_KEY` or `OPENAI_API_KEY` to their environment. The API route uploads
+  the video's audio to that provider, so do not set a key on the user's behalf.
+- Local Whisper is slow on long videos and downloads its model on first use;
+  warn the user before transcribing anything over about an hour.
+- When a command fails in a way that looks like an environment problem (yt-dlp
+  errors, missing formats, ffmpeg not found), run `ytk doctor` before retrying.

@@ -7,7 +7,8 @@
 # it survives plugin updates, which replace the cached plugin directory.
 #
 # Requires python3 and ffmpeg on the system.
-# Overrides: YTK_VENV (venv path), YTK_HOME (where harvested data is written).
+# Overrides: YTK_VENV (venv path), YTK_HOME (where harvested data is written),
+#            YTK_UPDATE_DAYS (yt-dlp refresh interval, default 7; 0 disables).
 set -euo pipefail
 
 # Absolute path to the skill directory (parent of bin/), following symlinks.
@@ -22,12 +23,28 @@ HERE="$(cd -P "$(dirname "$SRC")/.." && pwd)"
 # Stable venv location outside the (possibly cached/replaced) plugin directory.
 VENV="${YTK_VENV:-${XDG_CACHE_HOME:-$HOME/.cache}/ytk/venv}"
 PY="$VENV/bin/python"
+# yt-dlp[default] pulls in yt-dlp-ejs, which YouTube extraction needs alongside
+# a JavaScript runtime (deno, node or bun).
+PKG="yt-dlp[default]"
+STAMP="$VENV/.ytk-updated"
+UPDATE_DAYS="${YTK_UPDATE_DAYS:-7}"
 
 if [ ! -x "$PY" ] || ! "$PY" -c "import yt_dlp" >/dev/null 2>&1; then
   echo "ytk: first-run setup — creating virtualenv and installing yt-dlp..." >&2
   mkdir -p "$(dirname "$VENV")"
   python3 -m venv "$VENV" >&2
-  "$VENV/bin/pip" install --quiet --upgrade pip yt-dlp >&2
+  "$VENV/bin/pip" install --quiet --disable-pip-version-check --upgrade pip "$PKG" >&2
+  touch "$STAMP"
+elif [ "$UPDATE_DAYS" != "0" ] && \
+     { [ ! -e "$STAMP" ] || [ -n "$(find "$STAMP" -mtime "+$UPDATE_DAYS" 2>/dev/null)" ]; }; then
+  # YouTube changes often and an old yt-dlp stops working, so refresh it
+  # periodically. Best effort: being offline must not block the run.
+  echo "ytk: refreshing yt-dlp..." >&2
+  if "$VENV/bin/pip" install --quiet --disable-pip-version-check --upgrade "$PKG" >&2; then
+    touch "$STAMP"
+  else
+    echo "ytk: yt-dlp refresh failed, continuing with the installed version" >&2
+  fi
 fi
 
 # PYTHONPATH=$HERE so `python -m ytk` finds the package regardless of cwd.

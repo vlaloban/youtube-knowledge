@@ -1,7 +1,9 @@
 """Shared helpers for the ytk toolkit."""
+import functools
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,9 +12,31 @@ from pathlib import Path
 HOME = Path(os.environ.get("YTK_HOME", Path.home() / "yt-knowledge"))
 
 
+# JavaScript runtimes yt-dlp can use for YouTube, in its own priority order.
+JS_RUNTIMES = ("deno", "node", "bun")
+
+
+@functools.lru_cache(maxsize=1)
+def js_runtime():
+    """Return (name, path) of the first JavaScript runtime on PATH, or None."""
+    for name in JS_RUNTIMES:
+        path = shutil.which(name)
+        if path:
+            return name, path
+    return None
+
+
+def _js_runtime_args():
+    # yt-dlp enables only deno by default; any other runtime has to be named.
+    rt = js_runtime()
+    if rt and rt[0] != "deno":
+        return ["--js-runtimes", f"{rt[0]}:{rt[1]}"]
+    return []
+
+
 def ytdlp(args, capture=True):
     """Run yt-dlp (from this interpreter's env) and return CompletedProcess."""
-    cmd = [sys.executable, "-m", "yt_dlp", *args]
+    cmd = [sys.executable, "-m", "yt_dlp", *_js_runtime_args(), *args]
     return subprocess.run(
         cmd,
         check=False,
